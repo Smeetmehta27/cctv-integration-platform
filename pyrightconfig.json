@@ -1,0 +1,12 @@
+{
+    "venvPath": "c:/Gujarat-Hackathon/services/api",
+    "venv": "venv",
+    "executionEnvironments": [
+        {
+            "root": "."
+        }
+    ],
+    "extraPaths": [
+        "c:/Gujarat-Hackathon/services/api/venv/Lib/site-packages"
+    ]
+}

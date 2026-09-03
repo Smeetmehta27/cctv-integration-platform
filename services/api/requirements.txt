@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+asyncpg
+pydantic
+redis
+websockets
+python-dotenv
+aiosqlite
