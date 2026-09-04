@@ -6,6 +6,11 @@ VIGILIS is a modular, secure, and scalable CCTV video-intelligence platform desi
 ## Hackathon Context
 This platform is designed specifically for heterogeneous departmental CCTV/VMS integration. Existing departmental VMS infrastructure remains operational while this platform provides a common integration, intelligence, analytics, and command-center layer.
 
+## Version 2.0 Checkpoint (Production Architecture)
+- **Offline-First Resilience:** Synchronous local SQLite edge-database auto-provisioning if cloud DNS fails.
+- **Zero-500 Architecture:** Cascading database try/except fallbacks ensuring the API and Next.js GIS map never crash during schema mismatches.
+- **Automated Validation:** Fully passing E2E Python test suite for camera registry, websockets, and AI telemetry.
+
 ## Architecture
 Our hybrid architecture combines the following core concepts:
 - **Central CCTV Registry + GIS**: A unified geospatial registry of all camera assets.

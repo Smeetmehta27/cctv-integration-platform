@@ -1,15 +1,30 @@
+'use client';
+import dynamic from 'next/dynamic';
+
+const DynamicMap = dynamic(() => import('@/components/map/GujaratCCTVMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center bg-slate-900 rounded-xl border border-slate-800">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-slate-400 font-medium">Loading Statewide Mapping Engine...</p>
+      </div>
+    </div>
+  )
+});
+
 export default function MapPage() {
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-white mb-2">GIS Map</h1>
-        <p className="text-slate-400">Interactive geographic visualization of assets and events.</p>
+    <div className="w-full h-full flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Statewide GIS Intelligence</h1>
+          <p className="text-slate-400">Live geographic distribution of state CCTV assets</p>
+        </div>
       </div>
-      <div className="flex flex-col items-center justify-center h-96 border border-slate-800 bg-slate-900/50 rounded-lg text-slate-500 p-8 text-center">
-        <h2 className="text-xl font-medium text-slate-300 mb-2">Module coming in Phase 3</h2>
-        <p className="max-w-md">
-          GIS mapping requires camera and track geolocation data which is currently not exposed by the production API. This visualization will be enabled in Phase 3.
-        </p>
+      
+      <div className="flex-1 min-h-0">
+        <DynamicMap />
       </div>
     </div>
   );

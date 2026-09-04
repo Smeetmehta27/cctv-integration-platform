@@ -5,6 +5,7 @@ from services.api.routes.tracks import ACTIVE_TRACKS
 from packages.shared.database import get_db
 from sqlalchemy.ext.asyncio import AsyncSession
 from services.api.core.alert_engine import alert_engine
+from services.api.routes.tracking import HISTORICAL_DETECTIONS
 
 router = APIRouter(prefix="/internal/events", tags=["internal"])
 
@@ -40,6 +41,14 @@ async def broadcast_internal_event(payload: dict = Body(...), db: AsyncSession =
                 
         # Forward to Alert Engine for Watchlist matching
         await alert_engine.process_plate_event(payload, db)
+        
+        HISTORICAL_DETECTIONS.append({
+            "camera_id": camera_id,
+            "plate_number": plate_data.get("normalized_text"),
+            "confidence": plate_data.get("confidence", 0.95),
+            "timestamp": payload.get("timestamp"),
+            "snapshot_url": "https://vigilis-storage.local/snapshots/mock.jpg"
+        })
             
     elif camera_id and event_type == "TRACK_LOST":
         track_id = event_data.get("track_id")

@@ -36,6 +36,18 @@ class TrackerManager:
             self.previous_states[camera_id] = {}
         return self.isolated_trackers[camera_id]
 
+    def reset_tracker(self, camera_id: str):
+        """
+        Flushes the tracking state for a specific camera.
+        Crucial for looping video feeds (scene cuts) when the PTS resets.
+        """
+        if camera_id in self.isolated_trackers:
+            logger.info(f"[{camera_id}] Scene cut detected! Resetting tracker state.")
+            # Delete the instance so it gets recreated completely clean on next frame
+            del self.isolated_trackers[camera_id]
+        if camera_id in self.previous_states:
+            del self.previous_states[camera_id]
+
     def process_frame(self, camera_id: str, image_np: np.ndarray, pts: float) -> Tuple[List[Dict[str, Any]], float]:
         """
         Runs tracking on a frame for a specific camera.
@@ -103,3 +115,132 @@ class TrackerManager:
                     })
                     
         return tracks, inference_time_ms
+
+import math
+from datetime import datetime
+from packages.shared.database import AsyncSessionLocal
+from sqlalchemy import text
+
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371.0 # Earth radius in km
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return R * c
+
+class RouteReconstructor:
+    @staticmethod
+    async def reconstruct(plate_number: str, raw_events: list):
+        events = [e for e in raw_events if e['plate_number'] == plate_number]
+        if not events:
+            return {"summary": {}, "waypoints": []}
+            
+        for e in events:
+            if isinstance(e['timestamp'], str):
+                try:
+                    e['dt'] = datetime.fromisoformat(e['timestamp'].replace('Z', '+00:00'))
+                except:
+                    e['dt'] = datetime.utcnow()
+            else:
+                e['dt'] = e['timestamp']
+                
+        events.sort(key=lambda x: x['dt'])
+        
+        waypoints = []
+        current_wp = None
+        
+        for e in events:
+            if current_wp is None:
+                current_wp = {
+                    "camera_id": e['camera_id'],
+                    "entry_time": e['dt'],
+                    "exit_time": e['dt'],
+                    "snapshot_url": e.get('snapshot_url', ''),
+                    "confidence": e.get('confidence', 0.95),
+                    "events": 1
+                }
+            else:
+                dt_diff = (e['dt'] - current_wp['exit_time']).total_seconds()
+                if e['camera_id'] == current_wp['camera_id'] and dt_diff <= 40:
+                    current_wp['exit_time'] = e['dt']
+                    current_wp['events'] += 1
+                    current_wp['confidence'] = max(current_wp['confidence'], e.get('confidence', 0.95))
+                else:
+                    waypoints.append(current_wp)
+                    current_wp = {
+                        "camera_id": e['camera_id'],
+                        "entry_time": e['dt'],
+                        "exit_time": e['dt'],
+                        "snapshot_url": e.get('snapshot_url', ''),
+                        "confidence": e.get('confidence', 0.95),
+                        "events": 1
+                    }
+        if current_wp:
+            waypoints.append(current_wp)
+            
+        cam_ids = tuple(set(wp['camera_id'] for wp in waypoints))
+        cam_meta = {}
+        if cam_ids:
+            try:
+                async with AsyncSessionLocal() as session:
+                    placeholders = ','.join([f"'{cid}'" for cid in cam_ids])
+                    q = f"SELECT id, name, ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng, address FROM cameras WHERE id IN ({placeholders})"
+                    result = await session.execute(text(q))
+                    for r in result.fetchall():
+                        cam_meta[str(r[0])] = {
+                            "name": r[1],
+                            "lat": r[2],
+                            "lng": r[3],
+                            "address": r[4]
+                        }
+            except Exception as e:
+                logger.error(f"DB Error fetching camera coords: {e}")
+                
+        total_dist = 0.0
+        total_time_hr = 0.0
+        
+        for i, wp in enumerate(waypoints):
+            cid = wp['camera_id']
+            meta = cam_meta.get(cid, {})
+            wp['camera_name'] = meta.get('name', 'Unknown Camera')
+            wp['latitude'] = meta.get('lat', 0.0)
+            wp['longitude'] = meta.get('lng', 0.0)
+            wp['district'] = meta.get('address', 'Unknown')
+            wp['speed_from_prev'] = 0.0
+            
+            wp['entry_time'] = wp['entry_time'].isoformat()
+            wp['exit_time'] = wp['exit_time'].isoformat()
+            
+            if i > 0:
+                prev_wp = waypoints[i-1]
+                lat1, lng1 = prev_wp['latitude'], prev_wp['longitude']
+                lat2, lng2 = wp['latitude'], wp['longitude']
+                if lat1 and lng1 and lat2 and lng2:
+                    dist_km = haversine(lat1, lng1, lat2, lng2)
+                    total_dist += dist_km
+                    
+                    prev_dt = datetime.fromisoformat(prev_wp['exit_time'])
+                    curr_dt = datetime.fromisoformat(wp['entry_time'])
+                    dt_hr = (curr_dt - prev_dt).total_seconds() / 3600.0
+                    
+                    if dt_hr > 0:
+                        speed = dist_km / dt_hr
+                        wp['speed_from_prev'] = round(speed, 2)
+                        total_time_hr += dt_hr
+                        if speed > 150:
+                            wp['anomaly'] = "Speed exceeds 150 km/h"
+                        elif speed < 0:
+                            wp['anomaly'] = "Negative time delta"
+                        
+        avg_speed = round(total_dist / total_time_hr, 2) if total_time_hr > 0 else 0.0
+        
+        return {
+            "summary": {
+                "total_distance_km": round(total_dist, 2),
+                "total_transit_time_minutes": round(total_time_hr * 60, 2),
+                "cameras_passed_count": len(waypoints),
+                "average_speed_kmh": avg_speed
+            },
+            "waypoints": waypoints
+        }

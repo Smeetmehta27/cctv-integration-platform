@@ -1,98 +1,76 @@
-"use client";
+'use client';
 
-import { useEffect, useState } from "react";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { fetchAPI } from "@/lib/api";
+import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
+import { Search, Navigation } from 'lucide-react';
 
-interface Track {
-  camera_id: string;
-  track_id: number;
-  class_name: string;
-  confidence: number;
-  bbox: { x1: number, y1: number, x2: number, y2: number };
-  image_plane_velocity: number;
-  plate?: { normalized_text: string, confidence: number };
-}
+const DynamicVisualizer = dynamic(() => import('@/components/map/RouteVisualizer'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center bg-slate-900 rounded-xl border border-slate-800">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-slate-400 font-medium">Initializing Trajectory Engine...</p>
+      </div>
+    </div>
+  )
+});
 
 export default function TrackingPage() {
-  const [tracks, setTracks] = useState<Track[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [searchInput, setSearchInput] = useState('');
+  const [plateToTrack, setPlateToTrack] = useState('');
 
-  useEffect(() => {
-    const fetchTracks = async () => {
-      try {
-        const data = await fetchAPI("/tracks");
-        setTracks(data.tracks || []);
-      } catch (e) {
-        console.error("Failed to fetch tracks", e);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchTracks();
-    const interval = setInterval(fetchTracks, 1000); // Poll every second for live updates
-    return () => clearInterval(interval);
-  }, []);
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (searchInput.trim()) {
+      setPlateToTrack(searchInput.trim().toUpperCase());
+    }
+  };
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Live Vehicle Tracking</h1>
-        <p className="text-slate-400">Real-time object multi-tracking across all active camera streams.</p>
+    <div className="w-full h-full flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+            <Navigation className="w-6 h-6 text-blue-500" /> Route Reconstruction
+          </h1>
+          <p className="text-slate-400">Trace vehicle pathways across the statewide network</p>
+        </div>
+        
+        <form onSubmit={handleSearch} className="flex-1 max-w-md relative">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Search className="h-5 w-5 text-slate-400" />
+          </div>
+          <input
+            type="text"
+            className="block w-full pl-10 pr-24 py-3 bg-slate-900 border border-slate-700 rounded-xl text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent shadow-inner font-mono text-lg uppercase"
+            placeholder="e.g. GJ01ER8842"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          <button 
+            type="submit"
+            className="absolute inset-y-1.5 right-1.5 bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-lg text-sm font-semibold transition-colors shadow-lg"
+          >
+            Track
+          </button>
+        </form>
       </div>
-
-      <div className="rounded-md border border-slate-800 bg-slate-900/50 backdrop-blur-md">
-        <Table>
-          <TableHeader>
-            <TableRow className="border-slate-800 hover:bg-slate-800/50">
-              <TableHead className="text-slate-400">Camera</TableHead>
-              <TableHead className="text-slate-400">Track ID</TableHead>
-              <TableHead className="text-slate-400">Vehicle Type</TableHead>
-              <TableHead className="text-slate-400">License Plate</TableHead>
-              <TableHead className="text-slate-400">Img Velocity (px/s)</TableHead>
-              <TableHead className="text-slate-400">Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {tracks.length === 0 && !loading && (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center text-slate-500 py-8">
-                  NO HISTORICAL DATA / NO ACTIVE TRACKS
-                </TableCell>
-              </TableRow>
-            )}
-            {tracks.map((t, idx) => (
-              <TableRow key={`${t.camera_id}-${t.track_id}-${idx}`} className="border-slate-800 hover:bg-slate-800/50">
-                <TableCell className="font-mono text-slate-300">{t.camera_id}</TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="border-blue-500/30 text-blue-400 bg-blue-500/10">
-                    #{t.track_id}
-                  </Badge>
-                </TableCell>
-                <TableCell className="uppercase text-slate-300">
-                  {t.class_name} <span className="text-slate-500 text-xs ml-1">{(t.confidence * 100).toFixed(0)}%</span>
-                </TableCell>
-                <TableCell className="font-mono font-bold text-yellow-400">
-                  {t.plate?.normalized_text ? (
-                    <span>
-                      {t.plate.normalized_text} <span className="text-slate-500 text-xs ml-1 font-sans font-normal">{((t.plate.confidence || 0) * 100).toFixed(0)}%</span>
-                    </span>
-                  ) : (
-                    <span className="text-slate-600 font-sans font-normal">Detecting...</span>
-                  )}
-                </TableCell>
-                <TableCell className="font-mono text-slate-400">{t.image_plane_velocity > 0 ? t.image_plane_velocity.toFixed(1) : '-'}</TableCell>
-                <TableCell>
-                  <Badge className="bg-emerald-500/20 text-emerald-400 border-none hover:bg-emerald-500/30">
-                    ACTIVE
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      
+      <div className="flex-1 min-h-0 relative">
+        {plateToTrack ? (
+          <DynamicVisualizer plateNumber={plateToTrack} />
+        ) : (
+          <div className="w-full h-full rounded-xl border border-dashed border-slate-700 bg-slate-900/50 flex items-center justify-center">
+            <div className="text-center">
+              <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-700">
+                <Search className="w-8 h-8 text-slate-500" />
+              </div>
+              <h3 className="text-lg font-medium text-slate-300">Awaiting Target</h3>
+              <p className="text-slate-500 mt-1 max-w-sm">Enter a vehicle registration number above to reconstruct its spatial-temporal route.</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

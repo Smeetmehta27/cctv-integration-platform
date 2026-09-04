@@ -14,6 +14,18 @@ class CameraBase(BaseModel):
     codec: Optional[str] = None
     status: str = 'OFFLINE'
     is_active: bool = True
+    edge_node_cpu: Optional[float] = None
+    edge_node_gpu: Optional[float] = None
+    stream_errors: Optional[int] = 0
+
+class CameraHealthSummary(BaseModel):
+    total_cameras: int
+    online: int
+    offline: int
+    degraded: int
+    stream_errors: int
+    avg_edge_node_cpu: float
+    avg_edge_node_gpu: float
 
 class CameraResponse(CameraBase):
     id: UUID

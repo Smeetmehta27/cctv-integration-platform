@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 from services.ai.anpr_manager import ANPRManager
-from services.ai.plate_normalizer import PlateNormalizer
+from services.ai.plate_normalizer import IndianPlateNormalizer
 from services.ai.plate_stabilizer import PlateStabilizer
 
 def create_synthetic_car():

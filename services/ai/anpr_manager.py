@@ -3,7 +3,7 @@ import logging
 import cv2
 import numpy as np
 from typing import Optional, Tuple
-from services.ai.plate_normalizer import PlateNormalizer
+from services.ai.plate_normalizer import IndianPlateNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +54,8 @@ class ANPRManager:
             if conf < self.min_confidence:
                 continue
                 
-            normalized = PlateNormalizer.normalize(raw_text)
-            if PlateNormalizer.is_valid_format(normalized):
+            normalized = IndianPlateNormalizer.normalize(raw_text)
+            if IndianPlateNormalizer.is_valid_format(normalized):
                 if conf > highest_conf:
                     highest_conf = conf
                     best_plate = (raw_text, normalized, conf)

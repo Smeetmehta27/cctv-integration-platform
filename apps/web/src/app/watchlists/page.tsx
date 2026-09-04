@@ -1,90 +1,40 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-
-interface Watchlist {
-  id: string;
-  name: string;
-  category: string;
-  description: string;
-}
+import React, { useState } from 'react';
+import WatchlistTable from '@/components/watchlists/WatchlistTable';
+import AddWatchlistModal from '@/components/watchlists/AddWatchlistModal';
+import { List, Plus, UploadCloud } from 'lucide-react';
 
 export default function WatchlistsPage() {
-  const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  useEffect(() => {
-    async function loadWatchlists() {
-      try {
-        const data = await api.getWatchlists();
-        setWatchlists(data);
-      } catch (e) {
-        console.error("Failed to load watchlists", e);
-        setError(true);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadWatchlists();
-  }, []);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight text-white mb-2">Watchlists</h1>
-        <p className="text-slate-400">Manage surveillance watchlists and tracked entities.</p>
+    <div className="w-full h-full flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+            <List className="w-6 h-6 text-blue-500" />
+            Watchlist Database
+          </h1>
+          <p className="text-slate-400">Manage unified records from eGujCop, VAHAN, and local BOLO directives</p>
+        </div>
+        <div className="flex gap-3">
+          <button className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 border border-slate-700">
+            <UploadCloud className="w-4 h-4" /> Bulk CSV Import
+          </button>
+          <button 
+            onClick={() => setIsModalOpen(true)}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2 shadow-lg"
+          >
+            <Plus className="w-4 h-4" /> Add Record
+          </button>
+        </div>
+      </div>
+      
+      <div className="flex-1 min-h-0">
+        <WatchlistTable />
       </div>
 
-      <div className="rounded-md border border-slate-800 bg-slate-900/50 backdrop-blur-md">
-        <Table>
-          <TableHeader>
-            <TableRow className="border-slate-800 hover:bg-slate-800/50">
-              <TableHead className="text-slate-400">Name</TableHead>
-              <TableHead className="text-slate-400">Category</TableHead>
-              <TableHead className="text-slate-400">Description</TableHead>
-              <TableHead className="text-slate-400 font-mono text-right">ID</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading && (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center text-slate-500 py-12">
-                  Loading watchlists...
-                </TableCell>
-              </TableRow>
-            )}
-            {!loading && error && (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center text-red-500 py-12">
-                  Failed to load watchlists. Please check backend connection.
-                </TableCell>
-              </TableRow>
-            )}
-            {!loading && !error && watchlists.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center text-slate-500 py-12">
-                  No watchlists configured.
-                </TableCell>
-              </TableRow>
-            )}
-            {!loading && !error && watchlists.map((w) => (
-              <TableRow key={w.id} className="border-slate-800 hover:bg-slate-800/50">
-                <TableCell className="font-medium text-white">{w.name}</TableCell>
-                <TableCell>
-                  <Badge variant="outline" className="border-blue-500/50 text-blue-400 bg-blue-500/10">
-                    {w.category}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-slate-300">{w.description}</TableCell>
-                <TableCell className="font-mono text-slate-500 text-xs text-right">{w.id}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <AddWatchlistModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
     </div>
   );
 }

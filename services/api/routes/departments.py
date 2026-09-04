@@ -2,9 +2,7 @@ from fastapi import APIRouter
 
 router = APIRouter(prefix="/departments", tags=["departments"])
 
+@router.get("")
 @router.get("/")
 async def get_departments():
-    return [
-        {"id": "d1", "name": "Ahmedabad City Police", "region": "Ahmedabad"},
-        {"id": "d2", "name": "Surat City Police", "region": "Surat"}
-    ]
+    return ["Home Department", "RTO Gujarat", "Food & Civil Supplies", "Urban Development"]

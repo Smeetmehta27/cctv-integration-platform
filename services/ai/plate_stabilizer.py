@@ -1,23 +1,24 @@
 from typing import Dict, Optional
-from collections import defaultdict
+from collections import defaultdict, deque
 import logging
 
 logger = logging.getLogger(__name__)
 
 class PlateStabilizer:
     """
-    Maintains a temporal history of OCR reads for active vehicle tracks.
-    A plate is 'stabilized' when the same normalized text is read consistently
-    across multiple frames.
+    Maintains a sliding window of OCR reads for active vehicle tracks.
+    A plate is 'stabilized' when the same normalized text wins the majority vote
+    across the last N frames.
     """
-    def __init__(self, required_hits=2):
+    def __init__(self, window_size=10, required_hits=4):
+        self.window_size = window_size
         self.required_hits = required_hits
-        # { camera_id: { track_id: { "reads": {"GJ01AB1234": [0.8, 0.9]}, "stable_plate": "GJ01AB1234", "stable_conf": 0.9 } } }
+        # { camera_id: { track_id: { "reads": deque, "stable_plate": "GJ01AB1234", "stable_conf": 0.9, "raw_text": "..." } } }
         self.state: Dict[str, Dict[int, dict]] = defaultdict(lambda: defaultdict(self._empty_state))
 
     def _empty_state(self):
         return {
-            "reads": defaultdict(list), # Maps normalized_text -> list of confidences
+            "reads": deque(maxlen=self.window_size), # stores tuples (normalized_text, raw_text, confidence)
             "stable_plate": None,
             "stable_conf": 0.0,
             "raw_text": None
@@ -29,26 +30,43 @@ class PlateStabilizer:
         """
         track_state = self.state[camera_id][track_id]
         
-        # If we already have a stable plate, we don't necessarily need to overwrite it unless
-        # we see a vastly better read. For Stage 3.4, we lock onto the first stable read to save CPU.
-        # But we still record it.
-        track_state["reads"][normalized_text].append(confidence)
+        # Add to sliding window
+        track_state["reads"].append((normalized_text, raw_text, confidence))
         
-        # Is this plate now stable?
-        hits = len(track_state["reads"][normalized_text])
-        if hits >= self.required_hits:
-            avg_conf = sum(track_state["reads"][normalized_text]) / hits
+        # Tally votes in the window
+        vote_counts = defaultdict(int)
+        conf_sums = defaultdict(float)
+        
+        for n_text, r_text, conf in track_state["reads"]:
+            vote_counts[n_text] += 1
+            conf_sums[n_text] += conf
+            
+        # Find majority vote
+        best_plate = None
+        best_votes = 0
+        for p, v in vote_counts.items():
+            if v > best_votes:
+                best_votes = v
+                best_plate = p
+                
+        # Is it stable?
+        if best_votes >= self.required_hits:
+            avg_conf = conf_sums[best_plate] / best_votes
             
             # Lock or upgrade the stable plate
-            if track_state["stable_plate"] is None or (normalized_text == track_state["stable_plate"] and avg_conf > track_state["stable_conf"]):
-                track_state["stable_plate"] = normalized_text
+            # We allow upgrading if we get a substantially better read confidence
+            is_new_lock = track_state["stable_plate"] is None
+            is_upgrade = not is_new_lock and best_plate == track_state["stable_plate"] and avg_conf > track_state["stable_conf"] + 0.05
+            
+            if is_new_lock or is_upgrade:
+                track_state["stable_plate"] = best_plate
                 track_state["stable_conf"] = avg_conf
                 track_state["raw_text"] = raw_text
                 
-                logger.info(f"[{camera_id}] Track #{track_id} locked stable plate: {normalized_text} (conf: {avg_conf:.2f})")
+                logger.info(f"[{camera_id}] Track #{track_id} stabilized plate: {best_plate} (conf: {avg_conf:.2f}, votes: {best_votes})")
                 return {
                     "raw_text": raw_text,
-                    "normalized_text": normalized_text,
+                    "normalized_text": best_plate,
                     "confidence": round(avg_conf, 3)
                 }
                 
