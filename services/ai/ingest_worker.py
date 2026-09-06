@@ -24,8 +24,14 @@ SIM_CAMERA_ID = "SIM_DEMO_TRAFFIC"
 
 class IngestWorker:
     def __init__(self):
-        self.gateway_url = os.getenv("HACKATHON_GATEWAY_URL", "http://localhost:8000")
+        self.api_host = os.getenv("CONTROL_ROOM_API_HOST", "cctv.corp8.cloud")
+        self.stream_host = os.getenv("CONTROL_ROOM_STREAM_HOST", "103.250.160.189")
+        self.email = os.getenv("CONTROL_ROOM_EMAIL")
+        self.password = os.getenv("CONTROL_ROOM_PASSWORD")
+        
         self.enable_simulation = os.getenv("ENABLE_SIMULATION", "false").lower() == "true"
+        self.max_active_streams = int(os.getenv("MAX_ACTIVE_STREAMS", "1"))
+        self.default_camera_id = os.getenv("DEFAULT_CAMERA_ID", "1")
         self.tasks = []
 
     # ------------------------------------------------------------------
@@ -109,15 +115,21 @@ class IngestWorker:
     # ------------------------------------------------------------------
 
     async def fetch_catalogue(self):
-        """Fetches the active camera catalogue from the ingest API."""
+        """Fetches the active camera catalogue from a local catalogue.json file."""
+        import json
+        catalogue_path = os.path.join(_PROJECT_ROOT, "catalogue.json")
         try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(f"{self.gateway_url}/api/ingest", follow_redirects=True, timeout=5.0)
-                if resp.status_code == 200:
-                    return resp.json()
-                logger.error(f"Failed to fetch catalogue: HTTP {resp.status_code}")
+            with open(catalogue_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                logger.info(f"Successfully loaded catalogue from {catalogue_path}")
+                return data
+        except FileNotFoundError:
+            logger.error(f"Critical: catalogue.json not found at {catalogue_path}. Please download it manually and place it in the project root.")
+        except json.JSONDecodeError as e:
+            logger.error(f"Critical: Failed to parse catalogue.json: {e}")
         except Exception as e:
-            logger.error(f"Catalogue fetch failed: {e}")
+            logger.error(f"Critical: Failed to read catalogue.json: {e}")
+        
         return []
 
     async def capture_loop(self, camera: dict):
@@ -125,16 +137,25 @@ class IngestWorker:
         Connects to a single RTSP stream, reads frames, handles PTS and backoff,
         and pushes to the AI pipeline.
         """
-        camera_id = camera.get("id")
+        camera_id = str(camera.get("id"))
+        
+        # Use provided RTSP URL or construct based on stream host
         rtsp_url = camera.get("rtsp_url")
-        
-        email = os.getenv("CONTROL_ROOM_EMAIL")
-        password = os.getenv("CONTROL_ROOM_PASSWORD")
-        host = os.getenv("CONTROL_ROOM_HOST", "103.250.160.189")
-        
-        if email and password and camera_id:
-            encoded_email = urllib.parse.quote(email)
-            rtsp_url = f"rtsp://{encoded_email}:{password}@{host}:8554/stream/{camera_id}"
+        if not rtsp_url:
+            rtsp_url = f"rtsp://{self.stream_host}:8554/stream/{camera_id}"
+        else:
+            # Ensure the hostname defaults to stream_host before injecting credentials
+            parsed = urllib.parse.urlparse(rtsp_url)
+            port = parsed.port if parsed.port else 8554
+            rtsp_url = f"rtsp://{self.stream_host}:{port}{parsed.path}"
+            
+        # Inject authentication credentials
+        if self.email and self.password and rtsp_url.startswith("rtsp://"):
+            # Ensure we only inject if credentials aren't already present
+            if "@" not in rtsp_url.replace("rtsp://", ""):
+                encoded_email = urllib.parse.quote(self.email, safe='')
+                encoded_password = urllib.parse.quote(self.password, safe='')
+                rtsp_url = rtsp_url.replace("rtsp://", f"rtsp://{encoded_email}:{encoded_password}@")
         
         if not camera_id or not rtsp_url:
             logger.warning("Camera missing ID or RTSP URL, skipping.")
@@ -221,11 +242,21 @@ class IngestWorker:
         if not catalogue:
             logger.warning("Catalogue empty. Check connection to gateway. (Will not retry for prototype simplicity)")
         
+        live_cameras = []
         for cam in catalogue:
-            # Only connect to ONLINE cameras that have an RTSP URL
-            if cam.get("status") == "ONLINE" and cam.get("rtsp_url"):
-                task = asyncio.create_task(self.capture_loop(cam))
-                self.tasks.append(task)
+            status = cam.get("status", "").lower()
+            if status in ("live", "active", "online"):
+                live_cameras.append(cam)
+                
+        # Prioritize default camera
+        live_cameras.sort(key=lambda c: 0 if str(c.get("id")) == self.default_camera_id else 1)
+        
+        # Limit by max active streams
+        selected_cameras = live_cameras[:self.max_active_streams]
+        
+        for cam in selected_cameras:
+            task = asyncio.create_task(self.capture_loop(cam))
+            self.tasks.append(task)
                 
         if self.tasks:
             await asyncio.gather(*self.tasks)

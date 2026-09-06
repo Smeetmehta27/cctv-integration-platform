@@ -15,6 +15,7 @@ async def get_cameras():
         if db.AsyncSessionLocal is None:
             db.init_db()
             
+        assert db.AsyncSessionLocal is not None
         async with db.AsyncSessionLocal() as session:
             result = await session.execute(text("SELECT id, name, status, latitude, longitude FROM cameras"))
             
@@ -27,7 +28,8 @@ async def get_cameras():
                         "lat": float(row.latitude) if getattr(row, 'latitude', None) is not None else 23.0225,
                         "lng": float(row.longitude) if getattr(row, 'longitude', None) is not None else 72.5714
                     },
-                    "status": str(row.status)
+                    "status": str(row.status),
+                    "stream_url": f"http://localhost:8000/api/v1/stream/simulate-feed/{str(row.id)}"
                 })
             return cameras
     except Exception as e:
@@ -41,6 +43,7 @@ async def get_health_summary():
         if db.AsyncSessionLocal is None:
             db.init_db()
             
+        assert db.AsyncSessionLocal is not None
         async with db.AsyncSessionLocal() as session:
             result = await session.execute(text("SELECT status, count(*) FROM cameras GROUP BY status"))
             rows = result.fetchall()
@@ -65,6 +68,7 @@ async def get_camera(camera_id: str):
         if db.AsyncSessionLocal is None:
             db.init_db()
             
+        assert db.AsyncSessionLocal is not None
         async with db.AsyncSessionLocal() as session:
             result = await session.execute(text("SELECT id, name, status FROM cameras WHERE id = :id"), {"id": camera_id})
             row = result.fetchone()

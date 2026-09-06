@@ -16,18 +16,29 @@ class TrackerManager:
     never cross-contaminate between different video streams.
     """
     def __init__(self):
-        self.confidence_threshold = float(os.getenv("AI_CONFIDENCE", "0.4"))
+        self.confidence_threshold = float(os.getenv("AI_CONFIDENCE", "0.15"))
+        self.iou_threshold = float(os.getenv("AI_IOU", "0.50"))
+        self.imgsz = int(os.getenv("AI_IMGSZ", "320"))
         self.device = os.getenv("AI_DEVICE", "cpu")
 
         # Resolve the best available weight file once at startup
         self._ai_dir = os.path.dirname(os.path.abspath(__file__))
         self._project_root = os.path.abspath(os.path.join(self._ai_dir, "..", ".."))
-        self.model_name = self._resolve_weights()
-        logger.info(f"TrackerManager will use weights: {self.model_name}")
+        weight_env = os.getenv("AI_WEIGHTS", "itd_yolov8.pt")
+        if os.path.isabs(weight_env):
+            self.weights = weight_env
+        else:
+            self.weights = os.path.join(self._ai_dir, weight_env)
+            
+        logger.info(
+            f"TrackerManager config: weights={os.path.basename(self.weights)} "
+            f"conf={self.confidence_threshold} iou={self.iou_threshold} "
+            f"imgsz={self.imgsz} device={self.device}"
+        )
 
         # camera_id -> YOLO instance
         self.isolated_trackers: Dict[str, YOLO] = {}
-        
+
         # Keep track of previous centroids for image-plane velocity estimation
         # {camera_id: {track_id: {"centroid": (x,y), "pts": float}}}
         self.previous_states: Dict[str, Dict[int, Dict[str, Any]]] = {}
@@ -35,37 +46,17 @@ class TrackerManager:
         # Track whether we've created the OpenCV window
         self._window_initialised = False
 
-    def _resolve_weights(self) -> str:
-        """
-        Return the first weight file that actually exists on disk.
-        Falls back to the AI_MODEL env-var override if set.
-        """
-        env_override = os.getenv("AI_MODEL")
-        if env_override and os.path.isfile(env_override):
-            return env_override
+        # Cache the latest annotated frames as MJPEG bytes for HTTP proxying
+        self.latest_annotated_frames: Dict[str, bytes] = {}
 
-        candidates = [
-            os.path.join(self._ai_dir, "best.pt"),
-            os.path.join(self._ai_dir, "runs", "fgvd_finetune-2", "weights", "best.pt"),
-            os.path.join(self._ai_dir, "runs", "fgvd_finetune", "weights", "best.pt"),
-            os.path.join(self._ai_dir, "itd_yolov8.pt"),
-            os.path.join(self._project_root, "yolov8n.pt"),
-            os.path.join(self._ai_dir, "yolov8n.pt"),
-        ]
+        # Frame counter for periodic diagnostic logging
+        self._frame_count = 0
 
-        for path in candidates:
-            if os.path.isfile(path):
-                return path
-
-        raise FileNotFoundError(
-            "No YOLO weight file found. Searched:\n"
-            + "\n".join(f"  • {p}" for p in candidates)
-        )
 
     def _get_or_create_tracker(self, camera_id: str) -> YOLO:
         if camera_id not in self.isolated_trackers:
-            logger.info(f"[{camera_id}] Initializing isolated tracking pipeline with {os.path.basename(self.model_name)}...")
-            model = YOLO(self.model_name)
+            logger.info(f"[{camera_id}] Initializing isolated tracking pipeline with {os.path.basename(self.weights)}...")
+            model = YOLO(self.weights)
             if self.device != "cpu":
                 model.to(self.device)
             self.isolated_trackers[camera_id] = model
@@ -91,20 +82,35 @@ class TrackerManager:
         """
         model = self._get_or_create_tracker(camera_id)
         
+        self._frame_count += 1
         start_time = time.time()
-        
+
         # Use ByteTrack and persist=True to keep track state
         # No class filter — allows all FGVD fine-grained classes
         results = model.track(
             source=image_np,
             conf=self.confidence_threshold,
+            iou=self.iou_threshold,
+            imgsz=self.imgsz,
             device=self.device,
             tracker="bytetrack.yaml",
             persist=True,
-            verbose=False
+            verbose=False,
         )
-        
+
         inference_time_ms = (time.time() - start_time) * 1000.0
+
+        # --- Diagnostic logging (every 25 frames) ---
+        num_boxes = len(results[0].boxes) if len(results) > 0 and results[0].boxes is not None else 0
+        if self._frame_count % 25 == 0:
+            logger.info(
+                f"[TRACKER] frame={self._frame_count} | "
+                f"model={os.path.basename(self.weights)} | "
+                f"detections={num_boxes} | "
+                f"conf≥{self.confidence_threshold} | "
+                f"imgsz={self.imgsz} | "
+                f"inference={inference_time_ms:.1f}ms"
+            )
 
         # --- Live OpenCV visualiser ---
         if len(results) > 0:
@@ -114,6 +120,11 @@ class TrackerManager:
             annotated_frame = results[0].plot()
             cv2.imshow("VIGILIS AI - Live Tracking", annotated_frame)
             cv2.waitKey(1)  # flush UI buffer without blocking
+            
+            # Encode frame to JPEG and cache it for the local API MJPEG stream
+            success, buffer = cv2.imencode('.jpg', annotated_frame)
+            if success:
+                self.latest_annotated_frames[camera_id] = buffer.tobytes()
         
         tracks = []
         if len(results) > 0:
@@ -123,9 +134,9 @@ class TrackerManager:
             # Ultralytics boxes may not have 'id' if tracker hasn't assigned one yet
             if boxes is not None and boxes.id is not None:
                 track_ids = boxes.id.int().cpu().tolist()  # type: ignore[union-attr]
-                xyxys = boxes.xyxy.cpu().tolist()
-                confs = boxes.conf.cpu().tolist()
-                clss = boxes.cls.cpu().tolist()
+                xyxys = boxes.xyxy.cpu().tolist()  # type: ignore[union-attr]
+                confs = boxes.conf.cpu().tolist()  # type: ignore[union-attr]
+                clss = boxes.cls.cpu().tolist()  # type: ignore[union-attr]
                 
                 for t_id, xyxy, conf, cls in zip(track_ids, xyxys, confs, clss):
                     x1, y1, x2, y2 = map(int, xyxy)

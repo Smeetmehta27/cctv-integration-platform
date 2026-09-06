@@ -1,0 +1,9 @@
+[
+    {
+        "id": "cam01",
+        "name": "Chiman bhai Bridge",
+        "status": "live",
+        "codec": "h264",
+        "rtsp_url": "rtsp://103.250.160.189:8554/stream/cam01"
+    }
+]

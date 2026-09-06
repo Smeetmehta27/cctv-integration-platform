@@ -28,7 +28,7 @@ plate_stabilizer = PlateStabilizer(required_hits=2)
 # {camera_id: {track_id: timestamp}}
 last_reported_tracks = {}
 
-API_INTERNAL_EVENTS_URL = os.getenv("API_URL", "http://localhost:8000") + "/api/internal/events/"
+API_INTERNAL_EVENTS_URL = os.getenv("API_URL", "http://127.0.0.1:8000") + "/api/internal/events/"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -47,7 +47,7 @@ async def broadcast_detections(detections_payload: dict):
             if resp.status_code not in (200, 201):
                 logger.warning(f"Event broadcast returned HTTP {resp.status_code}")
     except Exception as e:
-        logger.error(f"Failed to broadcast detections to API: {e}")
+        logger.error(f"Failed to broadcast detections to API: {str(e)}")
 
 async def process_frame_logic(camera_id: str, frame: np.ndarray, pts_ms: float, timestamp: str | None = None):
     if timestamp is None:
@@ -178,6 +178,23 @@ async def health():
         "status": "ONLINE",
         "active_cameras": len(tracker_manager.isolated_trackers)
     }
+
+from fastapi.responses import StreamingResponse
+
+async def generate_ai_frames(camera_id: str):
+    while True:
+        frame_bytes = tracker_manager.latest_annotated_frames.get(camera_id)
+        if frame_bytes:
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+        await asyncio.sleep(1 / 15.0)
+
+@app.get("/stream/{camera_id}")
+async def ai_stream(camera_id: str):
+    return StreamingResponse(
+        generate_ai_frames(camera_id),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
 app.include_router(simulator_router)
 
