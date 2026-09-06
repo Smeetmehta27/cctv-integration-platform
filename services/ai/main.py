@@ -5,7 +5,8 @@ import httpx
 import logging
 import cv2
 import numpy as np
-from datetime import datetime
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
@@ -19,8 +20,6 @@ import asyncio
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="VIGILIS AI Tracking & ANPR Service", version="1.0.0")
-
 tracker_manager = TrackerManager()
 anpr_manager = ANPRManager()
 plate_stabilizer = PlateStabilizer(required_hits=2)
@@ -29,25 +28,30 @@ plate_stabilizer = PlateStabilizer(required_hits=2)
 # {camera_id: {track_id: timestamp}}
 last_reported_tracks = {}
 
-API_INTERNAL_EVENTS_URL = os.getenv("API_URL", "http://localhost:8000") + "/api/internal/events"
+API_INTERNAL_EVENTS_URL = os.getenv("API_URL", "http://localhost:8000") + "/api/internal/events/"
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     logger.info("Initializing AI Tracking Service...")
     from services.ai.ingest_worker import worker
     asyncio.create_task(worker.run())
+    yield
+
+app = FastAPI(title="VIGILIS AI Tracking & ANPR Service", version="1.0.0", lifespan=lifespan)
 
 async def broadcast_detections(detections_payload: dict):
     """Fire-and-forget background task to send events to the API."""
     try:
-        async with httpx.AsyncClient() as client:
-            await client.post(API_INTERNAL_EVENTS_URL, json=detections_payload, timeout=2.0)
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.post(API_INTERNAL_EVENTS_URL, json=detections_payload, timeout=2.0)
+            if resp.status_code not in (200, 201):
+                logger.warning(f"Event broadcast returned HTTP {resp.status_code}")
     except Exception as e:
         logger.error(f"Failed to broadcast detections to API: {e}")
 
-async def process_frame_logic(camera_id: str, frame: np.ndarray, pts_ms: float, timestamp: str = None):
+async def process_frame_logic(camera_id: str, frame: np.ndarray, pts_ms: float, timestamp: str | None = None):
     if timestamp is None:
-        timestamp = datetime.utcnow().isoformat() + "Z"
+        timestamp = datetime.now(timezone.utc).isoformat()
         
     try:
         tracks, inference_time_ms = tracker_manager.process_frame(camera_id, frame, pts_ms)
@@ -126,7 +130,7 @@ async def process_frame_logic(camera_id: str, frame: np.ndarray, pts_ms: float, 
         event_payload = {
             "event_type": "TRACK_LOST",
             "camera_id": camera_id,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "payload": {
                 "track_id": t_id
             }

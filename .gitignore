@@ -1,16 +1,20 @@
-# Dependencies
-node_modules/
-venv/
-.venv/
-env/
-.env_dir/
+# ============================================================
+# AI Training, Models & Datasets
+# ============================================================
+dataset/
+**/IDD_FGVD/
+services/ai/runs/
+*.pt
+*.cache
+*.onnx
+*.engine
 
-# Next.js
-.next/
-out/
-build/
+# Demo / media files
+demo_traffic.mp4
 
+# ============================================================
 # Python
+# ============================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -34,7 +38,28 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Caches
+# Virtual Environments
+venv/
+**/venv/
+.venv/
+env/
+.env_dir/
+
+# ============================================================
+# Next.js & Frontend
+# ============================================================
+node_modules/
+apps/web/node_modules/
+.next/
+apps/web/.next/
+apps/web/.turbo/
+.turbo/
+out/
+*.tsbuildinfo
+
+# ============================================================
+# Caches & Linting
+# ============================================================
 .eslintcache
 .pytest_cache/
 .mypy_cache/
@@ -42,25 +67,31 @@ MANIFEST
 .coverage
 htmlcov/
 
+# ============================================================
 # Environment Variables & Databases
+# ============================================================
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+apps/web/.env.local
 fallback.db
-.env.development.local
-.env.test.local
-.env.production.local
+*.db
+*.sqlite3
 
+# ============================================================
 # IDEs and OS Files
+# ============================================================
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
 
+# ============================================================
 # Logs
-logs
+# ============================================================
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*

@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import os
 import time
 import logging
+import cv2
 import numpy as np
-from typing import List, Dict, Any, Tuple
+from typing import Any, Dict
 from ultralytics import YOLO
 
 logger = logging.getLogger(__name__)
@@ -13,22 +16,55 @@ class TrackerManager:
     never cross-contaminate between different video streams.
     """
     def __init__(self):
-        self.model_name = os.getenv("AI_MODEL", "yolov8n.pt")
         self.confidence_threshold = float(os.getenv("AI_CONFIDENCE", "0.4"))
         self.device = os.getenv("AI_DEVICE", "cpu")
-        
+
+        # Resolve the best available weight file once at startup
+        self._ai_dir = os.path.dirname(os.path.abspath(__file__))
+        self._project_root = os.path.abspath(os.path.join(self._ai_dir, "..", ".."))
+        self.model_name = self._resolve_weights()
+        logger.info(f"TrackerManager will use weights: {self.model_name}")
+
         # camera_id -> YOLO instance
         self.isolated_trackers: Dict[str, YOLO] = {}
         
         # Keep track of previous centroids for image-plane velocity estimation
         # {camera_id: {track_id: {"centroid": (x,y), "pts": float}}}
         self.previous_states: Dict[str, Dict[int, Dict[str, Any]]] = {}
-        
-        self.target_classes = {0, 1, 2, 3, 5, 7} # person, bicycle, car, motorcycle, bus, truck
+
+        # Track whether we've created the OpenCV window
+        self._window_initialised = False
+
+    def _resolve_weights(self) -> str:
+        """
+        Return the first weight file that actually exists on disk.
+        Falls back to the AI_MODEL env-var override if set.
+        """
+        env_override = os.getenv("AI_MODEL")
+        if env_override and os.path.isfile(env_override):
+            return env_override
+
+        candidates = [
+            os.path.join(self._ai_dir, "best.pt"),
+            os.path.join(self._ai_dir, "runs", "fgvd_finetune-2", "weights", "best.pt"),
+            os.path.join(self._ai_dir, "runs", "fgvd_finetune", "weights", "best.pt"),
+            os.path.join(self._ai_dir, "itd_yolov8.pt"),
+            os.path.join(self._project_root, "yolov8n.pt"),
+            os.path.join(self._ai_dir, "yolov8n.pt"),
+        ]
+
+        for path in candidates:
+            if os.path.isfile(path):
+                return path
+
+        raise FileNotFoundError(
+            "No YOLO weight file found. Searched:\n"
+            + "\n".join(f"  • {p}" for p in candidates)
+        )
 
     def _get_or_create_tracker(self, camera_id: str) -> YOLO:
         if camera_id not in self.isolated_trackers:
-            logger.info(f"[{camera_id}] Initializing isolated tracking pipeline...")
+            logger.info(f"[{camera_id}] Initializing isolated tracking pipeline with {os.path.basename(self.model_name)}...")
             model = YOLO(self.model_name)
             if self.device != "cpu":
                 model.to(self.device)
@@ -48,7 +84,7 @@ class TrackerManager:
         if camera_id in self.previous_states:
             del self.previous_states[camera_id]
 
-    def process_frame(self, camera_id: str, image_np: np.ndarray, pts: float) -> Tuple[List[Dict[str, Any]], float]:
+    def process_frame(self, camera_id: str, image_np: np.ndarray, pts: float) -> tuple[list[dict[str, Any]], float]:
         """
         Runs tracking on a frame for a specific camera.
         Returns a tuple of (track_results, inference_time_ms).
@@ -58,17 +94,26 @@ class TrackerManager:
         start_time = time.time()
         
         # Use ByteTrack and persist=True to keep track state
+        # No class filter — allows all FGVD fine-grained classes
         results = model.track(
             source=image_np,
             conf=self.confidence_threshold,
             device=self.device,
-            classes=list(self.target_classes),
             tracker="bytetrack.yaml",
             persist=True,
             verbose=False
         )
         
         inference_time_ms = (time.time() - start_time) * 1000.0
+
+        # --- Live OpenCV visualiser ---
+        if len(results) > 0:
+            if not self._window_initialised:
+                cv2.namedWindow("VIGILIS AI - Live Tracking", cv2.WINDOW_NORMAL)
+                self._window_initialised = True
+            annotated_frame = results[0].plot()
+            cv2.imshow("VIGILIS AI - Live Tracking", annotated_frame)
+            cv2.waitKey(1)  # flush UI buffer without blocking
         
         tracks = []
         if len(results) > 0:
@@ -76,8 +121,8 @@ class TrackerManager:
             boxes = result.boxes
             
             # Ultralytics boxes may not have 'id' if tracker hasn't assigned one yet
-            if boxes.id is not None:
-                track_ids = boxes.id.int().cpu().tolist()
+            if boxes is not None and boxes.id is not None:
+                track_ids = boxes.id.int().cpu().tolist()  # type: ignore[union-attr]
                 xyxys = boxes.xyxy.cpu().tolist()
                 confs = boxes.conf.cpu().tolist()
                 clss = boxes.cls.cpu().tolist()
@@ -117,7 +162,7 @@ class TrackerManager:
         return tracks, inference_time_ms
 
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from packages.shared.database import AsyncSessionLocal
 from sqlalchemy import text
 
@@ -141,7 +186,7 @@ class RouteReconstructor:
                 try:
                     e['dt'] = datetime.fromisoformat(e['timestamp'].replace('Z', '+00:00'))
                 except:
-                    e['dt'] = datetime.utcnow()
+                    e['dt'] = datetime.now(timezone.utc)
             else:
                 e['dt'] = e['timestamp']
                 
