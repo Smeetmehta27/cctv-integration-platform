@@ -11,8 +11,6 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTa
 from pydantic import BaseModel
 
 from services.ai.tracker_manager import TrackerManager
-from services.ai.anpr_manager import ANPRManager
-from services.ai.plate_stabilizer import PlateStabilizer
 from services.ai.schemas import FrameTracks
 from services.ai.simulator import simulator, router as simulator_router
 import asyncio
@@ -21,33 +19,43 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 tracker_manager = TrackerManager()
-anpr_manager = ANPRManager()
-plate_stabilizer = PlateStabilizer(required_hits=2)
 
 # Store last reported states to throttle UPDATE events
-# {camera_id: {track_id: timestamp}}
+# {camera_id: {track_id: {"timestamp": float, "plate_emitted": bool}}}
 last_reported_tracks = {}
+background_tasks = set()
+http_client = None
 
 API_INTERNAL_EVENTS_URL = os.getenv("API_URL", "http://127.0.0.1:8000") + "/api/internal/events/"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global http_client
+    http_client = httpx.AsyncClient(follow_redirects=True)
     logger.info("Initializing AI Tracking Service...")
     from services.ai.ingest_worker import worker
-    asyncio.create_task(worker.run())
+    worker_task = asyncio.create_task(worker.run())
     yield
+    if http_client:
+        await http_client.aclose()
 
 app = FastAPI(title="VIGILIS AI Tracking & ANPR Service", version="1.0.0", lifespan=lifespan)
 
+def dispatch_event(payload: dict):
+    task = asyncio.create_task(broadcast_detections(payload))
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
+
 async def broadcast_detections(detections_payload: dict):
     """Fire-and-forget background task to send events to the API."""
+    if http_client is None:
+        return
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            resp = await client.post(API_INTERNAL_EVENTS_URL, json=detections_payload, timeout=2.0)
-            if resp.status_code not in (200, 201):
-                logger.warning(f"Event broadcast returned HTTP {resp.status_code}")
+        resp = await http_client.post(API_INTERNAL_EVENTS_URL, json=detections_payload, timeout=2.0)
+        if resp.status_code not in (200, 201):
+            logger.warning(f"Event broadcast returned HTTP {resp.status_code}")
     except Exception as e:
-        logger.error(f"Failed to broadcast detections to API: {str(e)}")
+        logger.error(f"Failed to broadcast detections to API: {type(e).__name__} - {e}")
 
 async def process_frame_logic(camera_id: str, frame: np.ndarray, pts_ms: float, timestamp: str | None = None):
     if timestamp is None:
@@ -59,7 +67,7 @@ async def process_frame_logic(camera_id: str, frame: np.ndarray, pts_ms: float, 
         logger.error(f"Inference failed: {e}")
         raise e
         
-    # 3. Process ANPR and Create Event Payloads & Throttle
+    # 3. Process Event Payloads & Throttle
     if camera_id not in last_reported_tracks:
         last_reported_tracks[camera_id] = {}
         
@@ -67,40 +75,40 @@ async def process_frame_logic(camera_id: str, frame: np.ndarray, pts_ms: float, 
     
     for trk in tracks:
         t_id = trk["track_id"]
-        bbox = trk["bbox"]
+        stable_plate = trk.get("plate_number")
         
-        # ANPR Logic
-        if trk["class_name"] in ["car", "truck", "bus", "motorcycle"] and not plate_stabilizer.has_stable_plate(camera_id, t_id):
-            crop = frame[bbox["y1"]:bbox["y2"], bbox["x1"]:bbox["x2"]]
-            plate_result = anpr_manager.read_plate(crop)
-            if plate_result:
-                raw, norm, conf = plate_result
-                stable = plate_stabilizer.add_reading(camera_id, t_id, raw, norm, conf)
-                if stable:
-                    plate_event = {
-                        "event_type": "PLATE_CONFIRMED",
-                        "camera_id": camera_id,
-                        "timestamp": timestamp,
-                        "payload": {
-                            "track_id": t_id,
-                            "plate": stable
-                        }
+        # Determine if we need to send PLATE_CONFIRMED
+        if stable_plate:
+            prev_rep = last_reported_tracks[camera_id].get(t_id, {})
+            if not prev_rep.get("plate_emitted", False):
+                plate_event = {
+                    "event_type": "PLATE_CONFIRMED",
+                    "camera_id": camera_id,
+                    "timestamp": timestamp,
+                    "payload": {
+                        "track_id": t_id,
+                        "plate": stable_plate
                     }
-                    asyncio.create_task(broadcast_detections(plate_event))
-        
-        trk["plate"] = plate_stabilizer.get_stable_plate(camera_id, t_id)
+                }
+                dispatch_event(plate_event)
+                
+                if t_id not in last_reported_tracks[camera_id]:
+                    last_reported_tracks[camera_id][t_id] = {"timestamp": current_time, "plate_emitted": True}
+                else:
+                    last_reported_tracks[camera_id][t_id]["plate_emitted"] = True
         
         if t_id not in last_reported_tracks[camera_id]:
             event_type = "TRACK_STARTED"
+            last_reported_tracks[camera_id][t_id] = {"timestamp": current_time, "plate_emitted": bool(stable_plate)}
         else:
             event_type = "TRACK_UPDATED"
             
         if event_type == "TRACK_UPDATED":
-            last_reported = last_reported_tracks[camera_id][t_id]
-            if (current_time - last_reported) < 1.0:
+            last_rep_ts = last_reported_tracks[camera_id][t_id]["timestamp"]
+            if (current_time - last_rep_ts) < 1.0:
                 continue
                 
-        last_reported_tracks[camera_id][t_id] = current_time
+        last_reported_tracks[camera_id][t_id]["timestamp"] = current_time
         
         event_payload = {
             "event_type": event_type,
@@ -113,20 +121,21 @@ async def process_frame_logic(camera_id: str, frame: np.ndarray, pts_ms: float, 
                 "bbox": trk["bbox"],
                 "centroid": trk["centroid"],
                 "image_plane_velocity": trk["image_plane_velocity"],
-                "plate": trk.get("plate")
+                "plate": stable_plate
             }
         }
-        asyncio.create_task(broadcast_detections(event_payload))
+        dispatch_event(event_payload)
         
     # TRACK_LOST logic
     active_ids = {trk["track_id"] for trk in tracks}
     lost_ids = []
     for t_id, last_rep in list(last_reported_tracks[camera_id].items()):
-        if t_id not in active_ids and (current_time - last_rep) > 3.0: 
+        if t_id not in active_ids and (current_time - last_rep["timestamp"]) > 3.0: 
             lost_ids.append(t_id)
             
     for t_id in lost_ids:
-        plate_stabilizer.cleanup_track(camera_id, t_id)
+        if hasattr(tracker_manager, 'plate_stabilizer'):
+            tracker_manager.plate_stabilizer.cleanup_track(camera_id, t_id)
         event_payload = {
             "event_type": "TRACK_LOST",
             "camera_id": camera_id,
@@ -135,7 +144,7 @@ async def process_frame_logic(camera_id: str, frame: np.ndarray, pts_ms: float, 
                 "track_id": t_id
             }
         }
-        asyncio.create_task(broadcast_detections(event_payload))
+        dispatch_event(event_payload)
         del last_reported_tracks[camera_id][t_id]
 
     return {

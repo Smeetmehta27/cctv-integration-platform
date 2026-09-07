@@ -31,7 +31,11 @@ def main():
     
     # Simulate Frame 1
     print("\n--- Processing Frame 1 ---")
-    res1 = anpr.read_plate(vehicle_crop)
+    frame1 = np.zeros((1000, 1000, 3), dtype=np.uint8)
+    frame1[300:700, 300:700] = vehicle_crop
+    bbox = {"x1": 300, "y1": 300, "x2": 700, "y2": 700}
+    
+    res1 = anpr.read_license_plate(frame1, bbox)
     if res1:
         raw, norm, conf = res1
         print(f"EasyOCR Output: Raw='{raw}', Normalized='{norm}', Conf={conf:.2f}")
@@ -43,7 +47,7 @@ def main():
     
     # Simulate Frame 2 (identical to Frame 1 for this test)
     print("\n--- Processing Frame 2 ---")
-    res2 = anpr.read_plate(vehicle_crop)
+    res2 = anpr.read_license_plate(frame1, bbox)
     if res2:
         raw, norm, conf = res2
         print(f"EasyOCR Output: Raw='{raw}', Normalized='{norm}', Conf={conf:.2f}")

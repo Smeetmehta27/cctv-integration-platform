@@ -24,13 +24,19 @@ class ANPRManager:
             self.reader = easyocr.Reader(['en'], gpu=False, verbose=False)
         return self.reader
 
-    def read_plate(self, vehicle_crop: np.ndarray) -> Optional[Tuple[str, str, float]]:
+    def read_license_plate(self, frame: np.ndarray, bbox: dict) -> Optional[Tuple[str, str, float]]:
         """
-        Takes a full vehicle BBOX crop.
+        Takes the full video frame and bounding box dictionary.
         Intelligently slices the bottom 50% (where the plate usually is),
         runs OCR, and returns the best normalized read.
         Returns: (raw_text, normalized_text, confidence)
         """
+        x1, y1, x2, y2 = bbox["x1"], bbox["y1"], bbox["x2"], bbox["y2"]
+        h_frame, w_frame = frame.shape[:2]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w_frame, x2), min(h_frame, y2)
+        
+        vehicle_crop = frame[y1:y2, x1:x2]
         h, w = vehicle_crop.shape[:2]
         
         # Too small to read a plate
@@ -50,7 +56,7 @@ class ANPRManager:
         best_plate = None
         highest_conf = 0.0
         
-        for bbox, raw_text, conf in results:
+        for r_bbox, raw_text, conf in results:
             if conf < self.min_confidence:
                 continue
                 

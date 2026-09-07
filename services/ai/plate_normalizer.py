@@ -108,7 +108,7 @@ class IndianPlateNormalizer:
 
     @staticmethod
     def _to_letters(text: str) -> str:
-        return text.translate(str.maketrans("01285", "OIZBS"))
+        return text.translate(str.maketrans("012856", "OIZBSG"))
         
     @staticmethod
     def _to_digits(text: str) -> str:

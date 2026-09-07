@@ -8,6 +8,9 @@ import numpy as np
 from typing import Any, Dict
 from ultralytics import YOLO
 
+from services.ai.anpr_manager import ANPRManager
+from services.ai.plate_stabilizer import PlateStabilizer
+
 logger = logging.getLogger(__name__)
 
 class TrackerManager:
@@ -52,6 +55,10 @@ class TrackerManager:
         # Frame counter for periodic diagnostic logging
         self._frame_count = 0
 
+        # ANPR components
+        self.anpr_manager = ANPRManager()
+        self.plate_stabilizer = PlateStabilizer(required_hits=2)
+
 
     def _get_or_create_tracker(self, camera_id: str) -> YOLO:
         if camera_id not in self.isolated_trackers:
@@ -74,6 +81,8 @@ class TrackerManager:
             del self.isolated_trackers[camera_id]
         if camera_id in self.previous_states:
             del self.previous_states[camera_id]
+        if hasattr(self, 'plate_stabilizer'):
+            self.plate_stabilizer.camera_states.pop(camera_id, None)
 
     def process_frame(self, camera_id: str, image_np: np.ndarray, pts: float) -> tuple[list[dict[str, Any]], float]:
         """
@@ -161,13 +170,29 @@ class TrackerManager:
                         "pts": pts
                     }
                     
+                    bbox_dict = {"x1": x1, "y1": y1, "x2": x2, "y2": y2}
+                    
+                    # ANPR Logic
+                    plate_number = None
+                    if class_name in ["car", "truck", "bus", "motorcycle"]:
+                        if not self.plate_stabilizer.has_stable_plate(camera_id, t_id):
+                            plate_result = self.anpr_manager.read_license_plate(image_np, bbox_dict)
+                            if plate_result:
+                                raw, norm, conf_val = plate_result
+                                self.plate_stabilizer.add_reading(camera_id, t_id, raw, norm, conf_val)
+                        
+                        stable_plate = self.plate_stabilizer.get_stable_plate(camera_id, t_id)
+                        if stable_plate:
+                            plate_number = stable_plate
+                    
                     tracks.append({
                         "track_id": t_id,
                         "class_name": class_name,
                         "confidence": round(conf, 3),
-                        "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                        "bbox": bbox_dict,
                         "centroid": {"x": cx, "y": cy},
-                        "image_plane_velocity": velocity
+                        "image_plane_velocity": velocity,
+                        "plate_number": plate_number
                     })
                     
         return tracks, inference_time_ms
