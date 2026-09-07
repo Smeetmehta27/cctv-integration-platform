@@ -53,7 +53,11 @@ class StreamManager:
                 reader = RobustVideoReader(camera_id=cam_id, rtsp_url=cam_info["rtsp_url"])
                 self.active_streams[cam_id] = reader
                 # Run the stream reader in the background
-                asyncio.create_task(reader.start())
+                if not hasattr(self, 'background_tasks'):
+                    self.background_tasks = set()
+                task = asyncio.create_task(reader.start())
+                self.background_tasks.add(task)
+                task.add_done_callback(self.background_tasks.discard)
 
     def stop_all(self):
         self.is_running = False

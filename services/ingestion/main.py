@@ -10,10 +10,14 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="VIGILIS Ingestion Service", version="1.0.0")
 manager = StreamManager()
 
+background_tasks = set()
+
 @app.on_event("startup")
 async def startup_event():
     logger.info("Starting Ingestion Stream Manager...")
-    asyncio.create_task(manager.poll_catalogue())
+    task = asyncio.create_task(manager.poll_catalogue())
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
 
 @app.on_event("shutdown")
 async def shutdown_event():
