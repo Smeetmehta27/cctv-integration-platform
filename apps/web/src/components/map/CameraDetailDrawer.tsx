@@ -4,9 +4,10 @@ import { X, MapPin, HardDrive, Video, ShieldAlert } from 'lucide-react';
 interface Camera {
   id: string;
   name: string;
-  department: string;
-  location: { coordinates: [number, number] } | null;
+  department?: string;
+  location: { lat: number; lng: number };
   status: string;
+  stream_url?: string;
 }
 
 interface Props {
@@ -16,6 +17,8 @@ interface Props {
 
 export default function CameraDetailDrawer({ camera, onClose }: Props) {
   if (!camera) return null;
+
+  const streamUrl = camera.stream_url || `http://localhost:8000/api/v1/stream/simulate-feed/${camera.id}`;
   
   return (
     <div className="absolute top-0 right-0 h-full w-96 bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col z-[1000] transition-transform duration-300">
@@ -38,7 +41,7 @@ export default function CameraDetailDrawer({ camera, onClose }: Props) {
           <div>
             <h3 className="text-xl font-bold text-white mb-1">{camera.name}</h3>
             <span className="inline-block px-2 py-1 bg-slate-800 text-xs font-medium text-slate-300 rounded border border-slate-700">
-              {camera.department}
+              {camera.department || camera.status}
             </span>
           </div>
           
@@ -48,7 +51,7 @@ export default function CameraDetailDrawer({ camera, onClose }: Props) {
                 <MapPin className="w-3 h-3" /> Location
               </div>
               <div className="text-sm text-slate-200">
-                {camera.location ? `${camera.location.coordinates[1].toFixed(4)}, ${camera.location.coordinates[0].toFixed(4)}` : 'Unknown'}
+                {camera.location ? `${camera.location.lat.toFixed(4)}, ${camera.location.lng.toFixed(4)}` : 'Unknown'}
               </div>
             </div>
             <div className="bg-slate-800 p-3 rounded-lg border border-slate-700">
@@ -66,7 +69,7 @@ export default function CameraDetailDrawer({ camera, onClose }: Props) {
             </div>
             <div className="relative w-full aspect-video bg-black rounded-lg border border-slate-700 overflow-hidden shadow-inner group">
               <img 
-                src={`http://localhost:8000/api/v1/stream/simulate-feed/${camera.id}`} 
+                src={streamUrl} 
                 alt="Live Stream"
                 className="w-full h-full object-cover"
                 onError={(e) => {

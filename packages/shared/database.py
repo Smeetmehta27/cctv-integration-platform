@@ -71,6 +71,41 @@ def init_db():
         _setup_fallback()
 
 import sqlite3
+import random
+
+# Gujarat city base coordinates for realistic scatter
+_GUJARAT_CITIES = [
+    ("Ahmedabad", 23.0225, 72.5714),
+    ("Surat", 21.1702, 72.8311),
+    ("Vadodara", 22.3072, 73.1812),
+    ("Rajkot", 22.3039, 70.8022),
+    ("Bhavnagar", 21.7645, 72.1519),
+    ("Jamnagar", 22.4707, 70.0577),
+    ("Junagadh", 21.5222, 70.4579),
+    ("Gandhinagar", 23.2156, 72.6369),
+    ("Anand", 22.5565, 72.9520),
+    ("Nadiad", 22.6916, 72.8634),
+    ("Morbi", 22.8173, 70.8370),
+    ("Mehsana", 23.5880, 72.3693),
+    ("Bharuch", 21.7051, 72.9959),
+    ("Vapi", 20.3893, 72.9106),
+    ("Navsari", 20.9467, 72.9520),
+    ("Veraval", 20.9159, 70.3629),
+    ("Porbandar", 21.6417, 69.6293),
+    ("Godhra", 22.7788, 73.6143),
+    ("Bhuj", 23.2420, 69.6669),
+    ("Palanpur", 24.1725, 72.4340),
+    ("Valsad", 20.5992, 72.9342),
+    ("Patan", 23.8493, 72.1266),
+    ("Dahod", 22.8350, 74.2525),
+    ("Amreli", 21.6015, 71.2204),
+    ("Surendranagar", 22.7201, 71.6480),
+    ("Kutch-Gandhidham", 23.0753, 70.1337),
+    ("Dwarka", 22.2394, 68.9678),
+    ("Diu", 20.7141, 70.9874),
+    ("Silvassa", 20.2766, 73.0088),
+    ("Daman", 20.3974, 72.8328),
+]
 
 def _setup_fallback():
     global engine, AsyncSessionLocal
@@ -79,20 +114,24 @@ def _setup_fallback():
     try:
         conn = sqlite3.connect("./fallback.db")
         cursor = conn.cursor()
-        cursor.execute("CREATE TABLE IF NOT EXISTS cameras (id TEXT PRIMARY KEY, name TEXT, status TEXT, latitude REAL, longitude REAL)")
-        
-        cursor.execute("SELECT COUNT(*) FROM cameras")
-        count = cursor.fetchone()[0]
-        
-        if count == 0:
-            logger.info("SQLite fallback active. Seeding 30 baseline sentinel cameras...")
-            for i in range(1, 31):
-                cam_id = f"cam{i:02d}"
-                cam_name = f"Fallback Sentinel {i:02d}"
-                cursor.execute(
-                    "INSERT INTO cameras (id, name, status, latitude, longitude) VALUES (?, ?, ?, ?, ?)",
-                    (cam_id, cam_name, "ONLINE", 23.0225, 72.5714)
-                )
+
+        # Drop and recreate to ensure scattered coordinates overwrite old identical ones
+        cursor.execute("DROP TABLE IF EXISTS cameras")
+        cursor.execute("CREATE TABLE cameras (id TEXT PRIMARY KEY, name TEXT, status TEXT, latitude REAL, longitude REAL)")
+
+        logger.info("SQLite fallback active. Seeding 30 cameras scattered across Gujarat...")
+        rng = random.Random(42)  # Fixed seed for reproducible scatter
+        for i in range(1, 31):
+            cam_id = f"cam{i:02d}"
+            city_name, base_lat, base_lng = _GUJARAT_CITIES[i - 1]
+            # Small jitter so pins don't land exactly on the city center
+            lat = base_lat + rng.uniform(-0.02, 0.02)
+            lng = base_lng + rng.uniform(-0.02, 0.02)
+            cam_name = f"{city_name} Sentinel {i:02d}"
+            cursor.execute(
+                "INSERT INTO cameras (id, name, status, latitude, longitude) VALUES (?, ?, ?, ?, ?)",
+                (cam_id, cam_name, "ONLINE", round(lat, 6), round(lng, 6))
+            )
         conn.commit()
         conn.close()
         logger.info("SQLite fallback ORM models initialized successfully.")

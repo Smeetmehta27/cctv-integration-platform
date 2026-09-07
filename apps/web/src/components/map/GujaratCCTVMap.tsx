@@ -9,13 +9,12 @@ import 'leaflet-defaulticon-compatibility/dist/leaflet-defaulticon-compatibility
 import CameraDetailDrawer from './CameraDetailDrawer';
 import { Filter } from 'lucide-react';
 
-const createCustomIcon = (department: string, hasAlert: boolean) => {
+const createCustomIcon = (status: string, hasAlert: boolean) => {
   let bgColor = 'bg-slate-500';
   
-  if (department.includes('Home') || department.includes('Police')) bgColor = 'bg-blue-500';
-  else if (department.includes('RTO')) bgColor = 'bg-amber-500';
-  else if (department.includes('Food')) bgColor = 'bg-emerald-500';
-  else if (department.includes('Urban')) bgColor = 'bg-purple-500';
+  if (status === 'ONLINE') bgColor = 'bg-emerald-500';
+  else if (status === 'DEGRADED') bgColor = 'bg-amber-500';
+  else if (status === 'OFFLINE') bgColor = 'bg-red-500';
 
   const pulseHtml = hasAlert ? `<div class="absolute -inset-2 rounded-full ${bgColor} opacity-50 animate-ping"></div>` : '';
 
@@ -35,9 +34,10 @@ const createCustomIcon = (department: string, hasAlert: boolean) => {
 interface Camera {
   id: string;
   name: string;
-  department: string;
-  location: { coordinates: [number, number] } | null;
+  department?: string;
+  location: { lat: number; lng: number };
   status: string;
+  stream_url?: string;
 }
 
 export default function GujaratCCTVMap() {
@@ -72,20 +72,18 @@ export default function GujaratCCTVMap() {
         zoomControl={false}
       >
         <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; CARTO'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
         
         {cameras.map(cam => {
-          if (!cam.location?.coordinates) return null;
-          const lat = cam.location.coordinates[1];
-          const lng = cam.location.coordinates[0];
+          if (!cam.location?.lat || !cam.location?.lng) return null;
           
           return (
             <Marker 
               key={cam.id} 
-              position={[lat, lng]} 
-              icon={createCustomIcon(cam.department, false)}
+              position={[cam.location.lat, cam.location.lng]} 
+              icon={createCustomIcon(cam.status, false)}
               eventHandlers={{
                 click: () => setSelectedCamera(cam),
               }}
