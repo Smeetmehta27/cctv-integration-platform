@@ -59,13 +59,11 @@ class IngestWorker:
             await self._fallback_to_mock_simulator()
             return
 
-        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        frame_delay = 1.0 / fps          # honour the source frame rate
         previous_pts = -1.0
 
         logger.info(
             f"[{camera_id}] Video opened — "
-            f"{int(cap.get(cv2.CAP_PROP_FRAME_COUNT))} frames @ {fps:.1f} FPS"
+            f"{int(cap.get(cv2.CAP_PROP_FRAME_COUNT))} frames"
         )
 
         try:
@@ -80,14 +78,26 @@ class IngestWorker:
                     previous_pts = -1.0
                     continue
 
-                # PTS handling
+                # PTS handling — all timing derived from PTS, never CAP_PROP_FPS
                 pts_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+
+                # Detect scene cuts / loop points via PTS discontinuity
                 if pts_ms < previous_pts:
                     logger.warning(
                         f"[{camera_id}] PTS dropped {previous_pts:.0f} → {pts_ms:.0f}. "
                         "Scene cut detected."
                     )
                     tracker_manager.reset_tracker(camera_id)
+
+                # Adaptive pacing: use PTS delta to sleep the correct duration
+                if previous_pts >= 0 and pts_ms > previous_pts:
+                    pts_delta_sec = (pts_ms - previous_pts) / 1000.0
+                    # Clamp to avoid stalling on large gaps (variable framerate resilience)
+                    await asyncio.sleep(min(pts_delta_sec, 0.5))
+                else:
+                    # First frame or discontinuity — minimal yield
+                    await asyncio.sleep(0.001)
+
                 previous_pts = pts_ms
 
                 # Standardize to 640×640 for inference
@@ -97,9 +107,6 @@ class IngestWorker:
                     await process_frame_logic(camera_id, resized, pts_ms)
                 except Exception as e:
                     logger.error(f"[{camera_id}] Inference crash: {e}")
-
-                # Yield to the event loop & pace to the source FPS
-                await asyncio.sleep(frame_delay)
         finally:
             cap.release()
             logger.info(f"[{camera_id}] Video capture released.")
