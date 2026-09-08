@@ -123,12 +123,13 @@ class TrackerManager:
 
         # --- Live OpenCV visualiser ---
         if len(results) > 0:
-            if not self._window_initialised:
-                cv2.namedWindow("VIGILIS AI - Live Tracking", cv2.WINDOW_NORMAL)
-                self._window_initialised = True
             annotated_frame = results[0].plot()
-            cv2.imshow("VIGILIS AI - Live Tracking", annotated_frame)
-            cv2.waitKey(1)  # flush UI buffer without blocking
+            if os.getenv("SHOW_DEBUG_WINDOW", "false").lower() == "true":
+                if not self._window_initialised:
+                    cv2.namedWindow("VIGILIS AI - Live Tracking", cv2.WINDOW_NORMAL)
+                    self._window_initialised = True
+                cv2.imshow("VIGILIS AI - Live Tracking", annotated_frame)
+                cv2.waitKey(1)  # flush UI buffer without blocking
             
             # Encode frame to JPEG and cache it for the local API MJPEG stream
             success, buffer = cv2.imencode('.jpg', annotated_frame)
@@ -265,9 +266,10 @@ class RouteReconstructor:
         if cam_ids:
             try:
                 async with AsyncSessionLocal() as session:
-                    placeholders = ','.join([f"'{cid}'" for cid in cam_ids])
+                    bind_params = {f"cid_{i}": cid for i, cid in enumerate(cam_ids)}
+                    placeholders = ', '.join([f":cid_{i}" for i in range(len(cam_ids))])
                     q = f"SELECT id, name, ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng, address FROM cameras WHERE id IN ({placeholders})"
-                    result = await session.execute(text(q))
+                    result = await session.execute(text(q), bind_params)
                     for r in result.fetchall():
                         cam_meta[str(r[0])] = {
                             "name": r[1],

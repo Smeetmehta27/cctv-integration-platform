@@ -5,12 +5,13 @@ dataset/
 **/IDD_FGVD/
 services/ai/runs/
 *.pt
+!services/ai/itd_yolov8.pt
 *.cache
 *.onnx
 *.engine
 
 # Demo / media files
-demo_traffic.mp4
+# demo_traffic.mp4 (tracked via LFS)
 
 # ============================================================
 # Python

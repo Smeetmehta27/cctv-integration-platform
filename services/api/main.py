@@ -14,9 +14,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="VIGILIS API", version="1.0.0", lifespan=lifespan)
 
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

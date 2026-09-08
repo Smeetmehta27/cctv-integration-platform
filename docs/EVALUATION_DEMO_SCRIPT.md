@@ -14,8 +14,8 @@
 ## 2. Live Alerting & Watchlist Correlation (0:30 - 1:15)
 *Action: Navigate to `/watchlists`, show the `GJ01ER8842` record.*
 > "To demonstrate our system's cross-referencing capabilities, we've loaded official data from eGujCop and VAHAN. Our target today is a stolen Toyota Fortuner, license plate GJ01ER8842."
-*Action: Navigate to the `/alerts` Operations Center. (Ensure the Python simulator script is running in the background).*
-> "Our edge nodes are constantly analyzing video using NVIDIA TensorRT optimized models. Watch what happens when our target vehicle is detected on the state highway."
+*Action: Navigate to the `/alerts` Operations Center. (Ensure the ingest worker is running with `ENABLE_SIMULATION=true` to process the `demo_traffic.mp4` video).*
+> "Our edge nodes are constantly analyzing real video using YOLOv8 and EasyOCR pipelines. Watch what happens when our target vehicle is detected in the video feed."
 *(Wait for the audio beep and the RED CRITICAL alert to flash on screen)*
 > "Instantly, a sub-second alert is fired via WebSockets. The system automatically corrects OCR anomalies specific to Indian HSRPs, like confusing a zero for an 'O', ensuring no false negatives."
 

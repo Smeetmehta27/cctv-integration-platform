@@ -52,9 +52,9 @@ class IngestWorker:
             if not cap.isOpened():
                 raise IOError(f"cv2.VideoCapture failed to open {DEMO_VIDEO_PATH}")
         except Exception as e:
-            logger.warning(
-                f"[{camera_id}] Could not open demo video ({e}). "
-                "Falling back to mock event simulator."
+            logger.critical(
+                f"[{camera_id}] CRITICAL: Could not open demo video ({e}). "
+                "The system is NOT running real inference. Falling back to mock event simulator."
             )
             await self._fallback_to_mock_simulator()
             return

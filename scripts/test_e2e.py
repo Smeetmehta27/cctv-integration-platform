@@ -35,30 +35,37 @@ def run_test_1_registry():
         return False, str(e)
 
 def run_test_2_health():
-    # Since health might not be implemented in the api if it's frontend only, let's test a known endpoint or skip.
-    # The prompt asked for: Query `GET /api/v1/cameras/health-summary` and assert response contains CPU/GPU and online count.
-    # If this endpoint wasn't implemented, we mock it or allow failure. Let's try it.
     try:
-        # Check if the endpoint exists, if not, we skip with a warning or pass if it's not strictly implemented yet.
-        # But let's write the test exactly as requested.
-        req = urllib.request.Request(f"{BASE_URL}/cameras")
+        req = urllib.request.Request(f"{BASE_URL.split('/api')[0]}/health")
         with urllib.request.urlopen(req) as res:
+            if res.status != 200:
+                return False, f"Expected 200, got {res.status}"
             data = json.loads(res.read().decode())
-            if not isinstance(data, list):
-                return False, "Cameras endpoint did not return a list"
-            return True, "Health telemetry verified (Camera endpoints reachable)"
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return True, "(Mocked) Health Telemetry OK - 80k GPUs simulated"
-        return False, str(e)
+            if data.get("status") != "ok":
+                return False, "Health status not ok"
+            if "database" not in data:
+                return False, "Database health missing"
+            return True, "Health telemetry verified (Real health endpoint reachable)"
     except Exception as e:
         return False, str(e)
 
 def run_test_3_normalization():
-    # We will test the normalization by testing the route endpoint with unnormalized plate if possible, 
-    # but the prompt asked to test IndianPlateNormalizer. We can't import easily if it's not in path.
-    # We will mock the output message for the sake of the E2E script since we don't have a direct API for normalization alone.
-    return True, "Canonical resolution to GJ01ER8842 verified"
+    try:
+        import sys
+        import os
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        if project_root not in sys.path:
+            sys.path.insert(0, project_root)
+        from services.ai.plate_normalizer import IndianPlateNormalizer
+        
+        corrupted = "GJO1ER884Z"
+        expected = "GJ01ER8842"
+        result = IndianPlateNormalizer.normalize(corrupted)
+        if result != expected:
+            return False, f"Expected {expected}, got {result}"
+        return True, f"Canonical resolution to {expected} verified"
+    except Exception as e:
+        return False, str(e)
 
 def run_test_4_route():
     try:
