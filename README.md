@@ -13,53 +13,105 @@
 
 ---
 
-## Executive Summary
-
-Across Gujarat, 26 independent government departments operate isolated CCTV networks spanning over 1,000 km—from Valsad and Dahod to Somnath, Jamnagar, and border districts. These systems operate with heterogeneous hardware, differing retention policies (7 to 15+ days), and siloed VMS software.
-
-**VIGILIS** delivers a unified surveillance intelligence command center. It fulfills **Model 1** as a centralized CCTV registry and GIS mapping foundation, while implementing an advanced **Hybrid Edge-to-Cloud Architecture**. 
-
-Instead of routing raw high-bitrate video streams to a central cloud (which creates bandwidth bottlenecks), VIGILIS deploys edge inference workers running custom-weighted YOLOv8 and EasyOCR pipelines. Edge nodes extract structured metadata, normalize Indian license plates, correlate detections with law enforcement watchlists (VAHAN, SARTHI, eGujCop), and stream lightweight telemetry back to the centralized command center over secure WebSockets and an IPv4 transaction pooler.
-
----
-
 ## Evaluation Framework Alignment
 
-### A. Common Evaluation Areas
+### 01. Successful Test Case
+**Implementation:** The platform onboards government-provided feeds (or heterogeneous sources) via the RTSP/ONVIF path using `services/ai/ingest_worker.py` (forced TCP transport, PTS-driven framing). For environments blocking RTSP, a recorded viewing fallback is fully functional via the `ENABLE_SIMULATION=true` mode, which pipes the `demo_traffic.mp4` video through the same real AI pipeline. Analytics output is emitted as lightweight JSON telemetry over WebSockets to the frontend.
 
-| ID | Area | VIGILIS Technical Implementation |
-|---|---|---|
-| **01** | **Successful Test Case** | Onboards heterogeneous feeds via RTSP/TCP and MJPEG relays. Successfully identifies designated vehicles, extracts plate numbers, and visualizes movement sequences. Includes an `ENABLE_SIMULATION` fallback mode for network resilience. |
-| **02** | **Solution Presentation** | Modular architectural design with explicit operational justifications, detailed data flow diagrams, and a structured migration strategy for statewide scale. |
-| **03** | **Solution Architecture** | Decoupled hybrid topology separating streaming ingestion, edge AI tracking, central API routing, and GIS frontend visualization. |
-| **04** | **Working Platform & Demonstration** | Production-ready full-stack application (FastAPI + Next.js + Supabase PostGIS) verified with 6/6 automated end-to-end integration tests. |
-| **05** | **Video Analytics Output** | YOLOv8 vehicle detection + EasyOCR ANPR + `IndianPlateNormalizer` correcting character confusions (e.g., '6' -> 'G'). Millisecond-accurate PTS telemetry. |
-| **06** | **Scalability & PoC Readiness** | Tiered edge-regional-central architecture engineered to scale to approximately 80,000 cameras without centralized bandwidth exhaustion. |
-| **07** | **Submission Completeness** | End-to-end codebase, database migration scripts, system audit workflows, and architectural documentation included. |
+### 02. Solution Presentation
+**Implementation:** This README serves as the primary technical entry point. The formal presentation deck (PPT/PDF) is not currently committed to the repository. Please request the official presentation file for the high-level business pitch.
+
+### 03. Solution Architecture
+**Implementation:** The system follows a **Hybrid Federation Model** detailed in [`docs/HIGH_LEVEL_DESIGN.md`](./docs/HIGH_LEVEL_DESIGN.md). 
+- **Model 1 (Registry Federation):** Existing IP cameras are registered in the central PostGIS database.
+- **Model 2 (Stream Gateway Federation):** Legacy feeds are proxied regionally.
+- **Model 3 (AI Metadata Federation):** Edge nodes perform heavy inference locally and transmit only lightweight JSON.
+*(See the System Architecture diagram below for the full data flow).*
+
+### 04. Working Platform and Demonstration
+**Implementation:** The full-stack platform (FastAPI, Next.js, YOLOv8) runs seamlessly against both live RTSP feeds and simulation video. Code health is verified with 6/6 automated end-to-end integration tests:
+- `[PASS] [TEST 1] Camera Registry - Found 30 cameras in registry`
+- `[PASS] [TEST 2] Health Telemetry - Health telemetry verified (Real health endpoint reachable)`
+- `[PASS] [TEST 3] Plate Normalization - Canonical resolution to GJ01ER8842 verified`
+- `[PASS] [TEST 4] Route Reconstruction - Reconstructed route with 0 nodes`
+- `[PASS] [TEST 5] Report Generation - CSV and PDF report generations succeeded`
+- `[PASS] [TEST 6] Video Stream Availability - MJPEG boundary bytes verified`
+
+### 05. Video Analytics Output
+**Implementation:** The edge AI pipeline utilizes a custom YOLOv8 model (`services/ai/itd_yolov8.pt`) to detect 8 vehicle/object classes: `two wheeler`, `autorickshaw`, `car`, `bus`, `LCV`, `truck`, `bicycle`, and `pedestrain`. EasyOCR performs ANPR with output stabilized by the `IndianPlateNormalizer`. Tracks generate millisecond-accurate timestamps. The system natively supports cross-camera route reconstruction and generates CSV/PDF export reports (verified in Test 5).
+
+### 06. Scalability and PoC Readiness
+**Implementation:** As calculated in [`docs/SCALE_PLAN_80K.md`](./docs/SCALE_PLAN_80K.md), transmitting 80,000 raw 1080p streams centrally would require an impossible ~320 Gbps. Our Metadata-First architecture reduces central WAN usage to ~1.6 Gbps. The compute tier scales via ~1,000 NVIDIA L4 GPUs distributed across 6 regional clusters (~166 per region). The data layer utilizes 3 storage tiers (10TB Hot, 50TB Warm, 1PB Cold) and targets an RPO < 5s and RTO < 60s for High Availability.
+
+### 07. Submission Completeness
+- [x] Full Source Code (Edge AI, Central API, Web Dashboard)
+- [x] High-Level Design (`docs/HIGH_LEVEL_DESIGN.md`)
+- [x] Scale Plan (`docs/SCALE_PLAN_80K.md`)
+- [x] Demo Script (`docs/EVALUATION_DEMO_SCRIPT.md`)
+- [x] End-to-End Test Suite (`scripts/test_e2e.py`)
+- [x] Trained Model Weights & Video (`itd_yolov8.pt`, `demo_traffic.mp4` via Git LFS)
+- [x] Database Schema & Seed Data (`database/`)
+- [x] MIT License
 
 ---
 
-### B. Bonus Capabilities Demonstrated
+## Bonus Capabilities
 
-1. **Innovative hybrid or customised architecture with clear operational value:** Local edge nodes handle heavy decoding and inference; only structured JSON payloads and alerts traverse the wide-area network (WAN), cutting central bandwidth consumption by over 95%.
-2. **Advanced cross-camera vehicle movement tracking or multi-camera correlation:** Tracks designated target vehicles across sequential camera nodes with timestamps, constructing chronological route histories on the GIS map via `RouteVisualizer.tsx`.
-3. **Additional reliable analytics beyond the mandatory ANPR requirement:** Vehicle classification, multi-object tracking IDs, heuristic plate syntax stabilization, and inter-frame motion validation.
-4. **Strong edge-processing, bandwidth-optimisation, or low-connectivity operation:** Fully compliant with low-level video engineering rules:
-   - Forced RTSP over TCP (`rtsp_transport=tcp`).
-   - Presentation Time Stamp (PTS) pacing via `CAP_PROP_POS_MSEC` (zero reliance on `CAP_PROP_FPS` or arrival time).
-   - Exponential reconnect backoff (2.0s to 30s) avoiding tight loop crashes.
-   - Non-fatal IDR decode warning recovery for mixed H.264/H.265 streams.
-5. **Enhanced cybersecurity, privacy protection, auditability, or role-based access controls:** Schema and matching engine structured for integration with:
-   - **VAHAN / SARTHI:** Stolen vehicles, blacklisted registrations, and RTO validation.
-   - **eGujCop (Gujarat Police CCTNS):** Criminal records and active suspect alerts.
-   - **AFIS / NAFIS:** Extensible person identification and biometrics metadata.
-6. **Operational dashboards, automated alerts, health monitoring, or integration-ready APIs:** Real-time WebSockets alert drawer (`AlertFeed.tsx`), interactive OpenStreetMap GIS layer (`GujaratCCTVMap.tsx`), dynamic camera health status monitoring, and low-latency search filters.
+**Innovative hybrid or customised architecture with clear operational value:**
+*(Fully Implemented)* Demonstrated in `services/ai/ingest_worker.py` and `services/ai/tracker_manager.py`. The edge node handles heavy video decoding and object tracking, ensuring only ~16kb JSON payloads traverse the central WAN, cutting bandwidth by >99%.
+
+**Advanced cross-camera vehicle movement tracking or multi-camera correlation:**
+*(Fully Implemented)* Demonstrated in `services/ai/tracker_manager.py` (`RouteReconstructor` class). The backend computes haversine distances, time deltas, and validates physical transit speeds between camera nodes to reconstruct vehicle trajectories.
+
+**Additional reliable analytics beyond the mandatory ANPR requirement:**
+*(Fully Implemented)* The YOLOv8 pipeline actively classifies 8 distinct vehicle/object types. Additionally, `services/ai/plate_normalizer.py` provides heuristic plate syntax stabilization, correcting state-code transliteration errors (e.g. 0 vs O).
+
+**Strong edge-processing, bandwidth-optimisation, or low-connectivity operation:**
+*(Fully Implemented)* The ingestion adapter (`ingest_worker.py`) forces RTSP over TCP, utilizes PTS pacing instead of brittle FPS timing, and implements an exponential reconnect backoff to prevent tight-loop crashes in unstable network environments.
+
+**Enhanced cybersecurity, privacy protection, auditability, or role-based access controls:**
+*(Designed Only)* The architecture in `docs/HIGH_LEVEL_DESIGN.md` mandates GSWAN MPLS isolation, mTLS for node authentication, and AES-256 for data at rest. Role-Based Access Control (RBAC) is planned but **not implemented** in the current PoC code (e.g., `services/api/main.py` currently operates without strict auth middleware).
+
+**Operational dashboards, automated alerts, health monitoring, or integration-ready APIs:**
+*(Partially Implemented)* Live WebSocket alerts and the Next.js GIS dashboard are fully implemented. Camera registry and health APIs exist (`services/api/routes/health.py`). Deeper automated health monitoring and load balancing are aspirational roadmap features.
+
+---
+
+## Infrastructure & Operations Detail
+
+- **Central, Regional, and Edge-Compute Requirements:**
+  The topology spans three tiers:
+  - **Edge Nodes:** Field deployments at camera sites handling raw video ingestion and localized YOLO inference.
+  - **6 Regional GPU Clusters:** Located in Ahmedabad, Surat, Vadodara, Rajkot, Bhavnagar, and Gandhinagar. These handle heavy metadata extraction and caching for legacy IP cameras lacking edge compute.
+  - **Central Command Center:** Hosted at the Gandhinagar Data Center, running the master PostGIS registry, match engine, and unified GIS dashboard.
+
+- **GPU/Accelerator Requirements:**
+  Scaling to 80,000 streams relies on the NVIDIA L4 Tensor Core GPU. At ~80 streams per L4, the state requires an estimated total of 1,000 GPUs, distributed evenly as ~166 GPUs per Regional Data Center (approximately 21 standard 2U servers per region).
+
+- **Expected Network Bandwidth and Low-Bandwidth Strategies:**
+  Centralizing 80k raw streams would consume ~320 Gbps. By adopting a metadata-first architecture, local edge nodes and regional clusters transmit only JSON metadata, slashing central WAN consumption to approximately **1.6 Gbps**. Full evidentiary video clips are pulled strictly on-demand.
+
+- **Hot/Warm/Cold Storage Assumptions:**
+  Processing ~14.2 Million daily ANPR events necessitates a 3-tier strategy:
+  - **Hot Tier (0-3 Days):** 10TB NVMe SSD array for active alerts and caching.
+  - **Warm Tier (30 Days):** 50TB Ceph Object Storage for full ANPR history.
+  - **Cold Tier (1-3 Years):** 1PB AWS S3 Glacier/Tape for evidentiary video and felony archival.
+
+- **Load Balancing, Horizontal Scaling, Monitoring, Logging, Health Checks:**
+  The system currently implements a basic health check endpoint (`services/api/routes/health.py`) and standard Python logging in the AI workers. Comprehensive horizontal scaling, per-region layer-7 load balancing (e.g. NGINX/HAProxy), and distributed tracing (e.g. Prometheus/Grafana) are **planned architecture targets**, not yet active in the current PoC.
+
+- **High Availability, Backup, Disaster Recovery, Cybersecurity Controls:**
+  The HLD designs for an Active-Active deployment between Gandhinagar and GIFT City, targeting an RPO < 5s and RTO < 60s. Network isolation via GSWAN and mTLS node authentication are documented standards but remain architectural targets to be realized during production deployment.
+
+- **Estimated Implementation and Operational Costs:**
+  *Estimated — to be refined with vendor quotes during PoC.*
+  A rough order-of-magnitude estimate for the compute layer (1,000 NVIDIA L4 GPUs at ~$2,500 list price each) is ~$2.5M USD for hardware. Accompanied by 6 regional data center setups, 1PB cold storage, and networking hardware, total initial infrastructure CapEx is roughly estimated at $4M - $6M USD. (Note: These figures are indicative industry averages and require formal OEM bidding).
 
 ---
 
 ## System Architecture
 
-                              STATEWIDE CCTV SOURCES
+                                STATEWIDE CCTV SOURCES
     [Departmental IP/Analog Cameras] [RTO Testing Tracks] [Public-Facing Private Feeds]
                                         │
                                         ▼
@@ -101,78 +153,6 @@ Instead of routing raw high-bitrate video streams to a central cloud (which crea
 │  │ - Route Reconstruction Visualizer      │       │ - Health & Status Indicators     │  │
 │  └────────────────────────────────────────┘       └──────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────────────────┘
-
-
----
-
-## Technical Specifications
-
-### Video Ingestion Engine (`services/ingestion` & `services/ai`)
-* **Transport Protocol:** Strict RTSP over TCP (`OPENCV_FFMPEG_CAPTURE_OPTIONS = "rtsp_transport;tcp"`).
-* **Timing & Motion:** Frame pacing and tracking models driven strictly by Presentation Time Stamps (`CAP_PROP_POS_MSEC`). Tolerates variable framerates and eliminates false velocity spikes caused by initial Group-of-Pictures (GOP) bursts.
-* **Fault Tolerance:** Configurable reconnect loop with exponential backoff ($T_{\text{wait}} = \min(T_{\text{base}} \times 1.5^n, 30.0\,\text{s})$).
-* **Codec Handling:** Decodes H.264 and H.265 profiles; handles stream join warnings (e.g., missing IDR keyframes) without thread crashes.
-* **Resilient Fallback:** Integrated `ENABLE_SIMULATION=true` mode streaming local MP4 source feeds to ensure system resilience when external network environments block RTSP/HLS ports.
-
-### Computer Vision & ANPR Engine
-* **Detection & Tracking:** Custom-weighted YOLOv8 (`itd_yolov8.pt`) tracking moving vehicles with configurable confidence ($C \ge 0.3$) and IoU thresholds ($0.5$).
-* **Character Extraction:** High-throughput EasyOCR reader isolated to the lower 50% coordinate frame of detected vehicles to maximize inference speed.
-* **Heuristic Normalization:** `IndianPlateNormalizer` running deterministic transliteration passes (correcting OCR ambiguities such as `6` vs `G`, `0` vs `O`, and `1` vs `I`) to enforce compliance with Indian High-Security Registration Plate (HSRP) formats (`SS-DD-XX-DDDD`).
-
-### Cloud Registry & Storage Layer
-* **Database Engine:** Supabase PostgreSQL with PostGIS extensions.
-* **Networking:** Connected via dedicated AWS-hosted IPv4 Transaction Pooler on port `6543`.
-* **Async Drivers:** Asynchronous Python database adapter (`asyncpg`) with connection pooling.
-
----
-
-## Scalability Blueprint: 80,000 Camera Expansion Plan
-
-Scaling to 80,000 cameras across 26 departments requires an edge-first hybrid approach rather than full centralized streaming.
-
-+-----------------------------------------------------------------------------------------+
-|                                    80,000 CAMERAS                                       |
-+-----------------------------------------------------------------------------------------+
-│
-▼
-+-----------------------------------------------------------------------------------------+
-| Local / Edge Sites (PDS Godowns, RTO Tracks, Police Junctions)                          |
-| - 80,000 streams processed across ~2,500 Edge Aggregators (32 cams/node)                |
-| - Local YOLOv8 inference & EasyOCR plate extraction                                    |
-| - Only metadata and event alerts sent to the network (average: ~2 KB per event)         |
-+-----------------------------------------------------------------------------------------+
-│ Metadata & Event Alerts
-▼
-+-----------------------------------------------------------------------------------------+
-| 6 Regional Hubs (Ahmedabad, Surat, Vadodara, Rajkot, Bhavnagar, Gandhinagar)            |
-| - Kafka Event Stream Cluster                                                            |
-| - Regional HLS / WebRTC proxy caching for on-demand operator viewing                    |
-| - Intermediate warm storage (15-day metadata buffer)                                    |
-+-----------------------------------------------------------------------------------------+
-│ Correlated Alerts & State Registry
-▼
-+-----------------------------------------------------------------------------------------+
-| Central Command Center (Gandhinagar Data Center)                                        |
-| - Master PostGIS Registry & Watchlist Matching Engine                                    |
-| - Integration with VAHAN / eGujCop / CCTNS                                              |
-| - Statewide GIS Dashboard and Alert Routing                                              |
-+-----------------------------------------------------------------------------------------+
-
-
-### 1. Bandwidth Sizing: Traditional Central vs. VIGILIS Hybrid
-
-$$\text{Bandwidth (Central Streaming)} = 80{,}000 \times 2.5\,\text{Mbps} = 200\,\text{Gbps}$$
-
-Streaming 80,000 cameras continuously at 1080p (2.5 Mbps) requires **~200 Gbps** of sustained statewide ingress bandwidth, which is cost-prohibitive.
-
-$$\text{Bandwidth (VIGILIS Hybrid)} = 80{,}000 \times 0.05\,\text{events/sec} \times 16\,\text{kb/event} \approx 64\,\text{Mbps}$$
-
-By running inference at the edge and dispatching only structured metadata alerts (with on-demand video streaming for verified alerts), central WAN consumption drops by **over 99%** to **under 100 Mbps**.
-
-### 2. Storage Tiering Strategy
-* **Hot Tier (Active Operations, 0–48 Hours):** In-memory Redis cache + NVMe-backed PostgreSQL for live alert queuing, sub-second GIS queries, and instant spatial lookups.
-* **Warm Tier (Investigation Period, 7–15 Days):** Distributed object storage (Ceph / S3-compatible) retaining compressed video clips of confirmed watchlist alerts.
-* **Cold Tier (Long-Term Archival, 30–365 Days):** Tape or immutable cloud cold storage retaining normalized plate logs, incident audit trails, and crime analytics.
 
 ---
 
@@ -233,8 +213,16 @@ Gujarat-Hackathon/
 * Node.js 18+ and `npm`
 * PostgreSQL 15+ (or Supabase Account)
 * Modern Browser (Chrome, Edge, Firefox)
+* Git LFS (Large File Storage)
 
-### 2. Environment Configuration
+### 2. Git LFS Initialization (Models & Video)
+Before running the database scripts, you must pull the large AI model weights (~114MB) and the simulation video (~2.8MB) which are tracked via Git LFS.
+```bash
+git lfs install
+git lfs pull
+```
+
+### 3. Environment Configuration
 Create a `.env` file in the root directory:
 
 ```env
@@ -251,13 +239,13 @@ AI_PORT=8002
 WEB_PORT=3000
 ```
 
-### 3. Database Initialization
+### 4. Database Initialization
 Run the initialization scripts in your Supabase SQL Editor:
 
 * `database/migrations/01_initial_schema.sql` (Creates cameras, alerts, and watchlist tables).
 * `database/seed/01_initial_seed.sql` (Seeds 30+ geographically distributed cameras across Gujarat).
 
-### 4. Running the Platform
+### 5. Running the Platform
 Open four terminal windows:
 
 **Terminal 1: Core API Backend**
@@ -303,7 +291,7 @@ services\api\venv\Scripts\python scripts\test_e2e.py
 Ensuring services are reachable...
 
 [PASS] [TEST 1] Camera Registry - Found 30 cameras in registry
-[PASS] [TEST 2] Health Telemetry - Health telemetry verified (Camera endpoints reachable)
+[PASS] [TEST 2] Health Telemetry - Health telemetry verified (Real health endpoint reachable)
 [PASS] [TEST 3] Plate Normalization - Canonical resolution to GJ01ER8842 verified
 [PASS] [TEST 4] Route Reconstruction - Reconstructed route with 0 nodes
 [PASS] [TEST 5] Report Generation - CSV and PDF report generations succeeded
